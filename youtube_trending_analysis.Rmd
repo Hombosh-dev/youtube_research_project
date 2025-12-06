@@ -1,0 +1,52 @@
+---
+title: "youtube_research_project"
+author: "Kosiv Marta, Hombosh Oleh, Kolodchak Bohdan"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Project Description
+
+##### Data Source: Kaggle: [Kaggle: Trending YouTube Video Statistics](https://www.kaggle.com/datasets/datasnaek/youtube-new)
+
+For our research project, we have selected the Trending YouTube Video Statistics dataset. This dataset contains information about the daily trending YouTube videos in several countries (US, GB, DE, CA). It provides variables such as: views, likes, dislikes, comment_count, tags, category_id.
+
+This data allows us to analyze what makes a video popular and test different hypotheses about viewer engagement.
+
+Some useful packages:
+
+```{r}
+library(readr)
+```
+
+The first step was to read data and look what actually we can analyze.
+
+```{r}
+path <- "dataset/"
+files <- list.files(path, pattern = "*.csv", full.names = TRUE)
+
+df_list <- lapply(files, function(file) {
+  data <- read_csv(file, show_col_types = FALSE)
+  
+  country_name <- file %>%
+    basename() %>%
+    substr(1, 2)
+  
+  data$country <- country_name
+  return(data)
+})
+
+df <- bind_rows(df_list)
+
+print(head(df))
+```
+
+## 1
+
+
+
+## 2
+
+
+
+## 3
