@@ -16,6 +16,7 @@ This data allows us to analyze what makes a video popular and test different hyp
 Some useful packages:
 
 ```{r}
+library(tidyverse)
 library(readr)
 ```
 
@@ -41,12 +42,184 @@ df <- bind_rows(df_list)
 print(head(df))
 ```
 
-## 1
+## Part I. Pareto Principle (80/20)
 
+We analyze the inequality of channel views to test if they follow a **Power-Law (Pareto) distribution**.
 
+### 1. Theory & Parameter Estimation (MLE)
+
+#### Mathematical Derivation of MLE Estimator
+
+To justify our calculation of $\alpha$, we derive the Maximum Likelihood Estimator (MLE) from the Pareto Probability Density Function (PDF).
+
+**1. The Likelihood Function** Given a sample of observations $x_1, x_2, ..., x_n$ following a Pareto distribution with PDF $f(x) = \frac{\alpha x_m^\alpha}{x^{\alpha+1}}$, the likelihood function $L(\alpha)$ is the product of individual probabilities:
+
+$$L(\alpha) = \prod_{i=1}^n \frac{\alpha x_m^\alpha}{x_i^{\alpha+1}} = \alpha^n x_m^{n\alpha} \prod_{i=1}^n x_i^{-(\alpha+1)}$$
+
+**2. The Log-Likelihood Function** It is computationally easier to maximize the log-likelihood ($\ln L$). Taking the natural logarithm transforms the product into a sum:
+
+$$\ln L(\alpha) = n \ln \alpha + n\alpha \ln x_m - (\alpha+1) \sum_{i=1}^n \ln x_i$$
+
+**3. Maximization** To find the optimal $\alpha$, we take the derivative with respect to $\alpha$ and set it to zero:
+
+$$\frac{\partial \ln L}{\partial \alpha} = \frac{n}{\alpha} + n \ln x_m - \sum_{i=1}^n \ln x_i = 0$$
+
+**4. Solving for** $\alpha$ Rearranging the terms allows us to isolate $\hat{\alpha}$:
+
+$$\frac{n}{\hat{\alpha}} = \sum_{i=1}^n \ln x_i - n \ln x_m = \sum_{i=1}^n (\ln x_i - \ln x_m)$$ $$\frac{n}{\hat{\alpha}} = \sum_{i=1}^n \ln \left( \frac{x_i}{x_m} \right)$$
+
+Finally, we obtain the formula used in our code:
+
+$$\hat{\alpha} = \frac{n}{\sum_{i=1}^n \ln(x_i / x_m)}$$
+
+where $x_m$ is the minimum value and $\alpha$ is the shape parameter (tail index).
+
+Below, we perform this calculation manually in R.
+
+### 2. Data Processing & Visualization
+
+#### Data processing
+
+First, we aggregate the data to handle duplicates. Since the dataset contains daily snapshots, the same video appears multiple times. To avoid double-counting, we extract the **peak (maximum) views** for each unique video before summing them up for the channel.
+
+```{r}
+channel_stats <- df %>%
+  group_by(video_id) %>%
+  summarise(
+    channel_title = first(channel_title),
+    max_video_views = max(views, na.rm = TRUE), # Peak views for the video
+    .groups = "drop"
+  ) %>%
+  group_by(channel_title) %>%
+  summarise(total_views = sum(max_video_views, na.rm = TRUE)) %>%
+  filter(total_views > 0) %>%
+  arrange(desc(total_views))
+
+x_min <- 5000 
+pareto_data <- channel_stats %>% filter(total_views >= x_min)
+
+n <- nrow(pareto_data)
+
+log_sum <- sum(log(pareto_data$total_views / x_min))
+alpha_hat <- n / log_sum
+
+print(paste("Sample size (tail n):", n))
+print(paste("Minimum views (x_min):", x_min))
+print(paste("Estimated Alpha (Shape Parameter):", round(alpha_hat, 4)))
+```
+
+The calculated shape parameter $\alpha \approx 0.28$ indicates an extremely heavy tail. In standard Pareto distributions, $\alpha$ typically ranges between 1 and 3. A value below 1 implies that the mathematical mean of the distribution is infinite. This confirms that the YouTube ecosystem is dominated by "black swan" events-viral videos that skew all average metrics.
+
+#### Figure 1: Distribution of Views (Linear Scale)
+
+As described in the problem statement, we first observe the distribution on a standard linear scale to identify skewness.
+
+```{r}
+ggplot(channel_stats, aes(x = total_views)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "white") +
+  scale_x_continuous(labels = scales::comma) +
+  labs(title = "Figure 1: Distribution of Total Views (Linear Scale)",
+       subtitle = "Extreme positive skewness suggests a heavy-tailed distribution",
+       x = "Total Views", y = "Count of Channels") +
+  theme_minimal()
+```
+
+#### Figure 2: Log-Log Scale Analysis
+
+To confirm the Pareto law, we plot the tail data ($x \ge x_{min}$) on a log-log scale. A straight line indicates adherence to the power law.
+
+```{r}
+ggplot(pareto_data, aes(x = total_views)) +
+  geom_histogram(bins = 50, fill = "#69b3a2", color = "white", alpha = 0.8) +
+  scale_x_log10(labels = scales::comma, 
+                breaks = scales::trans_breaks("log10", function(x) 10^x)) + 
+  scale_y_log10(breaks = scales::trans_breaks("log10", function(x) 10^x)) +
+  labs(title = "Figure 2: Distribution of Views (Log-Log Scale)",
+       subtitle = paste("Tail analysis (x >= ", x_min, ") shows linear descent"),
+       x = "Total Views (Log Scale)", 
+       y = "Count of Channels (Log Scale)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+Figure 1 confirms the extreme positive skewness of the data. The vast majority of channels cluster near zero, while a tiny fraction extends far to the right, making the tail invisible on a standard linear scale.To test the Power-Law hypothesis, we switch to a log-log scale (Figure 2).
+
+A signature feature of Pareto distributions is a straight line on this plot. As observed, the filtered tail ($x \ge 5000$) follows a clear linear descent, providing strong visual evidence for the Power-Law model.
+
+### 3. Inequality Visualization (Lorenz Curve)
+
+To quantify the concentration of views, we construct a Lorenz curve. If views were distributed equally, the curve would follow the diagonal ($y=x$).
+
+```{r}
+# Data for Lorenz Curve
+lorenz_data <- pareto_data %>%
+  arrange(total_views) %>%
+  mutate(
+    cum_channels = row_number() / n(),
+    cum_views = cumsum(total_views) / sum(total_views)
+  )
+
+top_20_share <- lorenz_data %>% 
+  filter(cum_channels >= 0.8) %>% 
+  head(1) %>% 
+  pull(cum_views)
+
+ggplot(lorenz_data, aes(x = cum_channels, y = cum_views)) +
+  geom_line(color = "darkred", size = 1.2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  annotate("text", x = 0.6, y = 0.2, 
+           label = paste0("Bottom 80% own ", round(top_20_share*100, 2), "% of views"), 
+           color = "darkred", fontface="italic") +
+  labs(title = "Lorenz Curve: Visualizing Inequality",
+       subtitle = "Deviation from the diagonal line shows extreme inequality",
+       x = "Cumulative % of Channels", y = "Cumulative % of Views") +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+```
+
+Conclusion: The curve is extremely convex, staying close to the x-axis until the very end. This illustrates the "Winner-Takes-All" nature of YouTube, where the top percentile of creators captures the lion's share of attention.
+
+### 4. Kolmogorov-Smirnov test
+
+Finally, we formally test the goodness of fit using the Kolmogorov-Smirnov (KS) test.
+
+Hypotheses:
+
+$H_0$: The channel views follow a Pareto distribution.
+
+$H_1$: The channel views do not follow a Pareto distribution.
+
+The KS statistic $D$ measures the maximum distance between the empirical CDF and the theoretical CDF:$$D = \max_x |F_{empirical}(x) - F_{theoretical}(x)|$$
+
+```{r}
+# Define theoretical Pareto CDF function
+ppareto_manual <- function(x, xm, alpha) { ifelse(x < xm, 0, 1 - (xm / x)^alpha) }
+
+# Run KS Test on the filtered tail data
+ks_res <- ks.test(jitter(pareto_data$total_views), "ppareto_manual", xm = x_min, alpha = alpha_hat)
+print(ks_res)
+
+# Visualization: Empirical vs Theoretical CDF
+ggplot(pareto_data, aes(x = total_views)) +
+  stat_ecdf(geom = "step", color = "black", size = 1, aes(linetype = "Empirical Data")) +
+  stat_function(fun = ppareto_manual, args = list(xm = x_min, alpha = alpha_hat), 
+                color = "red", size = 1, aes(linetype = "Theoretical Pareto")) +
+  scale_x_log10(labels = scales::comma) +
+  labs(title = "KS-Test: Empirical vs Theoretical CDF",
+       subtitle = "Visual comparison of the actual data against the ideal Pareto model",
+       x = "Total Views (Log Scale)", y = "Cumulative Probability") +
+  scale_linetype_manual(name = "Legend", values = c("solid", "dashed"), 
+                        guide = guide_legend(override.aes = list(color = c("black", "red")))) +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+### 5. Conclusion
+
+The KS-test yields a p-value $< 2.2 \times 10^{-16}$, leading to a formal rejection of $H_0$. This is a standard outcome when applying strict statistical tests to large datasets ($N > 30,000$), where even minor deviations are flagged as significant.
+
+However, the Log-Log visualization (Figure 2) and the ECDF plot above demonstrate that the theoretical Pareto curve (red dashed line) closely tracks the empirical data. Therefore, we conclude that the Pareto distribution is a strong descriptive model for the trending video ecosystem, confirming the extreme inequality in viewer attention.
 
 ## 2
-
-
 
 ## 3
