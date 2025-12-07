@@ -559,17 +559,6 @@ summary(lm_fit)
 # MLE ОЦІНКИ ДЛЯ ЛОГІСТИЧНОЇ МЕДІАЦІЇ
 # ========================================
 
-# 1. M ~ X
-plot(X_original, M_original, pch = 16, cex = 0.3, col = rgb(0, 0, 0, 0.2),
-     xlab = "Comment Rate", ylab = "Likes Ratio", main = "Медіатор M ~ X")
-abline(a = a0/1000, b = a, col = "blue", lwd = 2)
-legend("topleft", legend = paste0("M = ", round(a0/1000, 3), " + ", round(a, 3), " × X"),
-       col = "blue", lwd = 2, bty = "n")
-
-# 2. Predicted probabilities (з трендом)
-eta_pred <- c_prime_original * X_original + b_original * M_original + intercept_Y
-p_pred <- 1 / (1 + exp(-eta_pred))
-
 # Підготовка даних
 X_original <- df_mediation$comment_rate
 M_original <- df_mediation$likes_ratio
@@ -755,6 +744,23 @@ graphs
 # ========================================
 
 par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
+
+# 1. M ~ X
+plot(X_original, M_original, pch = 16, cex = 0.3, col = rgb(0, 0, 0, 0.2),
+     xlab = "Comment Rate", ylab = "Likes Ratio", main = "Медіатор M ~ X")
+abline(a = a0/1000, b = a, col = "blue", lwd = 2)
+legend("topleft", legend = paste0("M = ", round(a0/1000, 3), " + ", round(a, 3), " × X"),
+       col = "blue", lwd = 2, bty = "n")
+
+# 2. Predicted probabilities (з трендом)
+eta_pred <- c_prime_original * X_original + b_original * M_original + intercept_Y
+p_pred <- 1 / (1 + exp(-eta_pred))
+
+# Бінування для тренду
+x_bins <- cut(X_original, breaks = 20, include.lowest = TRUE)
+x_bin_mid <- tapply(X_original, x_bins, mean)
+p_bin_mean <- tapply(p_pred, x_bins, mean)
+y_bin_obs <- tapply(Y, x_bins, mean)
 
 plot(X_original, p_pred, pch = 16, cex = 0.3, col = rgb(0, 0, 1, 0.15),
      xlab = "Comment Rate", ylab = "P(Y=1)", main = "Прогнозована ймовірність",
