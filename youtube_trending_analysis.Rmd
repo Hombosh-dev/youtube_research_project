@@ -423,10 +423,10 @@ add comment_rate, like ratio, trending_next_day
 sample_videos <- sample(unique(df$video_id), 100000)
 
 # Фільтруємо датафрейм для цих відео
-df_sample <- df %>% filter(video_id %in% sample_videos)
+df_mediation <- df %>% filter(video_id %in% sample_videos)
 
 # Створення похідних змінних
-df_sample <- df_sample %>%
+df_mediation <- df_mediation %>%
   mutate(
     comment_rate = (comment_count / views)*1000,
     likes_ratio = (likes / views)*1000,
@@ -434,7 +434,7 @@ df_sample <- df_sample %>%
   )
 
 # Позначаємо, чи відео потрапило в тренди на наступний день
-df_sample <- df_sample %>%
+df_mediation <- df_mediation %>%
   arrange(video_id, trending_date) %>%
   group_by(video_id) %>%
   mutate(
@@ -443,9 +443,9 @@ df_sample <- df_sample %>%
   ) %>%
   ungroup()
 
-df_sample$trending_next_day <- as.numeric(df_sample$trending_next_day)
+df_mediation$trending_next_day <- as.numeric(df_mediation$trending_next_day)
 
-head(df_sample)
+head(df_mediation)
 
 
 ```
@@ -453,7 +453,7 @@ head(df_sample)
 Vizual - Distribution of Comment Counts
 ```{r}
 
-ggplot(df, aes(x = comment_count)) +
+ggplot(df_mediation, aes(x = comment_count)) +
   geom_histogram(bins = 50, fill = "skyblue", color = "black") +
   scale_x_log10() +
   labs(title = "Distribution of Comment Counts",
@@ -463,14 +463,14 @@ ggplot(df, aes(x = comment_count)) +
 vizual Top Channels by Videos Trending Next Day + distribution of likes
 ```{r}
 # Histogram of likes
-ggplot(df, aes(x = likes)) +
+ggplot(df_mediation, aes(x = likes)) +
   geom_histogram(bins = 50, fill = "salmon", color = "black") +
   scale_x_log10() +
   labs(title = "Distribution of Likes",
        x = "Likes (log scale)", y = "Frequency")
 
 # Top 10 channels by number of next-day trending videos
-top_channels <- df %>%
+top_channels <- df_mediation %>%
   filter(trending_next_day == 1) %>%
   group_by(channel_title) %>%
   summarise(n_videos = n()) %>%
@@ -489,10 +489,10 @@ vizual comments rate vs trend in next day
 ```{r}
 
 # Розмір датасету
-cat("Number of rows in dataset:", nrow(df), "\n")
+cat("Number of rows in dataset:", nrow(df_mediation), "\n")
 
 # Підрахунок відео за статусом наступного дня
-table_trending <- table(df$trending_next_day)
+table_trending <- table(df_mediation$trending_next_day)
 table_trending
 
 # Альтернативно, вивести у відсотках
@@ -503,7 +503,7 @@ prop.table(table_trending)
 comments vs likes
 ```{r}
 
-ggplot(df, aes(x=comment_rate, y=likes_ratio)) +
+ggplot(df_mediation, aes(x=comment_rate, y=likes_ratio)) +
   geom_point(alpha=0.3) +
   labs(title="Likes Ratio vs Comment Rate", x="Comment Rate", y="Likes Ratio")
 
@@ -524,19 +524,19 @@ $$
 
 ```{r}
 # Let`s find a
-mean_of_comments = mean(df$comment_rate)
-mean_of_likes = mean(df$likes_ratio)
+mean_of_comments = mean(df_mediation$comment_rate)
+mean_of_likes = mean(df_mediation$likes_ratio)
 
 
-a = sum((df$comment_rate - mean_of_comments)*(df$likes_ratio - mean_of_likes))/sum((df$comment_rate - mean_of_comments)^2)
+a = sum((df_mediation$comment_rate - mean_of_comments)*(df_mediation$likes_ratio - mean_of_likes))/sum((df_mediation$comment_rate - mean_of_comments)^2)
 
 a0 = mean_of_likes * 1000 - a*mean_of_comments* 1000
 
 cat("a = ", a, "\n")
 cat("a0 = ", a0 , "\n")
-lm_fit <- lm(likes_ratio ~ comment_rate, data=df)
+lm_fit <- lm(likes_ratio ~ comment_rate, data=df_mediation)
 
-ggplot(df, aes(x = comment_rate*1000, y = likes_ratio*1000)) +
+ggplot(df_mediation, aes(x = comment_rate*1000, y = likes_ratio*1000)) +
   geom_point(alpha = 0.3) +
   geom_abline(intercept = a0, slope = a, color = "red", size = 1) +
   labs(
@@ -559,10 +559,21 @@ summary(lm_fit)
 # MLE ОЦІНКИ ДЛЯ ЛОГІСТИЧНОЇ МЕДІАЦІЇ
 # ========================================
 
+# 1. M ~ X
+plot(X_original, M_original, pch = 16, cex = 0.3, col = rgb(0, 0, 0, 0.2),
+     xlab = "Comment Rate", ylab = "Likes Ratio", main = "Медіатор M ~ X")
+abline(a = a0/1000, b = a, col = "blue", lwd = 2)
+legend("topleft", legend = paste0("M = ", round(a0/1000, 3), " + ", round(a, 3), " × X"),
+       col = "blue", lwd = 2, bty = "n")
+
+# 2. Predicted probabilities (з трендом)
+eta_pred <- c_prime_original * X_original + b_original * M_original + intercept_Y
+p_pred <- 1 / (1 + exp(-eta_pred))
+
 # Підготовка даних
-X_original <- df$comment_rate
-M_original <- df$likes_ratio
-Y <- df$trending_next_day
+X_original <- df_mediation$comment_rate
+M_original <- df_mediation$likes_ratio
+Y <- df_mediation$trending_next_day
 
 # Видалення NA
 valid_idx <- !is.na(X_original) & !is.na(M_original) & !is.na(Y)
@@ -744,23 +755,6 @@ graphs
 # ========================================
 
 par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
-
-# 1. M ~ X
-plot(X_original, M_original, pch = 16, cex = 0.3, col = rgb(0, 0, 0, 0.2),
-     xlab = "Comment Rate", ylab = "Likes Ratio", main = "Медіатор M ~ X")
-abline(a = a0/1000, b = a, col = "blue", lwd = 2)
-legend("topleft", legend = paste0("M = ", round(a0/1000, 3), " + ", round(a, 3), " × X"),
-       col = "blue", lwd = 2, bty = "n")
-
-# 2. Predicted probabilities (з трендом)
-eta_pred <- c_prime_original * X_original + b_original * M_original + intercept_Y
-p_pred <- 1 / (1 + exp(-eta_pred))
-
-# Бінування для тренду
-x_bins <- cut(X_original, breaks = 20, include.lowest = TRUE)
-x_bin_mid <- tapply(X_original, x_bins, mean)
-p_bin_mean <- tapply(p_pred, x_bins, mean)
-y_bin_obs <- tapply(Y, x_bins, mean)
 
 plot(X_original, p_pred, pch = 16, cex = 0.3, col = rgb(0, 0, 1, 0.15),
      xlab = "Comment Rate", ylab = "P(Y=1)", main = "Прогнозована ймовірність",
