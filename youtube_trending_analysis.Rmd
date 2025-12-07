@@ -42,6 +42,7 @@ df <- bind_rows(df_list)
 print(head(df))
 ```
 
+
 ## Part I. Pareto Principle (80/20)
 
 We analyze the inequality of channel views to test if they follow a **Power-Law (Pareto) distribution**.
@@ -151,12 +152,14 @@ A signature feature of Pareto distributions is a straight line on this plot. As 
 To quantify the concentration of views, we construct a Lorenz curve. If views were distributed equally, the curve would follow the diagonal ($y=x$).
 
 ```{r}
-# Data for Lorenz Curve
+alpha_8020 <- log(5) / log(4)
+
 lorenz_data <- pareto_data %>%
   arrange(total_views) %>%
   mutate(
     cum_channels = row_number() / n(),
-    cum_views = cumsum(total_views) / sum(total_views)
+    cum_views = cumsum(total_views) / sum(total_views),
+    theoretical_8020 = 1 - (1 - cum_channels)^(1 - 1/alpha_8020)
   )
 
 top_20_share <- lorenz_data %>% 
@@ -164,14 +167,21 @@ top_20_share <- lorenz_data %>%
   head(1) %>% 
   pull(cum_views)
 
-ggplot(lorenz_data, aes(x = cum_channels, y = cum_views)) +
-  geom_line(color = "darkred", size = 1.2) +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
-  annotate("text", x = 0.6, y = 0.2, 
-           label = paste0("Bottom 80% own ", round(top_20_share*100, 2), "% of views"), 
-           color = "darkred", fontface="italic") +
-  labs(title = "Lorenz Curve: Visualizing Inequality",
-       subtitle = "Deviation from the diagonal line shows extreme inequality",
+ggplot(lorenz_data, aes(x = cum_channels)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dotted", color = "gray", size = 1) +
+  annotate("text", x = 0.3, y = 0.35, label = "Perfect Equality", color = "gray", angle = 45) +
+
+  geom_line(aes(y = theoretical_8020), color = "steelblue", linetype = "dashed", size = 1) +
+  annotate("text", x = 0.5, y = 0.18, label = "Classic 80/20 Rule", color = "steelblue") +
+
+  geom_line(aes(y = cum_views), color = "darkred", size = 1.2) +
+  
+  annotate("text", x = 0.65, y = 0.05, 
+           label = paste0("YouTube Reality:\nBottom 80% own ", round(top_20_share*100, 2), "%"), 
+           color = "darkred", fontface="bold", hjust = 0) +
+
+  labs(title = "Lorenz Curve: YouTube vs. Classic Pareto",
+       subtitle = "Comparing Empirical Data against the standard 80/20 Rule",
        x = "Cumulative % of Channels", y = "Cumulative % of Views") +
   scale_x_continuous(labels = scales::percent) +
   scale_y_continuous(labels = scales::percent) +
