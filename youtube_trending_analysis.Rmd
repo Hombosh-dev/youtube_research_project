@@ -130,6 +130,8 @@ ggplot(channel_stats, aes(x = total_views)) +
   theme_minimal()
 ```
 
+
+
 #### Figure 2: Log-Log Scale Analysis
 
 To confirm the Pareto law, we plot the tail data ($x \ge x_{min}$) on a log-log scale. A straight line indicates adherence to the power law.
@@ -192,8 +194,14 @@ ggplot(lorenz_data, aes(x = cum_channels)) +
   scale_y_continuous(labels = scales::percent) +
   theme_minimal()
 ```
+The Lorenz Curve provides a visual representation of the inequality in viewership distribution. The graph compares our empirical data (dark red line) against two benchmarks: the line of Perfect Equality (gray dotted diagonal, where everyone gets equal views) and the standard Classic 80/20 Pareto Rule (blue dashed curve).
+
+The empirical curve hugs the x-axis much more tightly than the classic Pareto model. This indicates that the inequality on YouTube is significantly more severe than in standard economic scenarios.
+
+As annotated on the graph, the bottom 80% of channels capture only 7.31% of the total views. Conversely, this implies that the top 20% of channels dominate approximately 92.7% of all viewer attention.
 
 Conclusion: The curve is extremely convex, staying close to the x-axis until the very end. This illustrates the "Winner-Takes-All" nature of YouTube, where the top percentile of creators captures the lion's share of attention.
+
 
 ### 4. Kolmogorov-Smirnov test
 
