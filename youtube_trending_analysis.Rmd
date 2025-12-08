@@ -58,7 +58,9 @@ To justify our calculation of $\alpha$, we derive the Maximum Likelihood Estimat
 
 **1. The Likelihood Function** Given a sample of observations $x_1, x_2, ..., x_n$ following a Pareto distribution with PDF $f(x) = \frac{\alpha x_m^\alpha}{x^{\alpha+1}}$, the likelihood function $L(\alpha)$ is the product of individual probabilities:
 
-$$L(\alpha) = \prod_{i=1}^n \frac{\alpha x_m^\alpha}{x_i^{\alpha+1}} = \alpha^n x_m^{n\alpha} \prod_{i=1}^n x_i^{-(\alpha+1)}$$
+$$
+L(\alpha) = \prod_{i=1}^n \frac{\alpha x_m^\alpha}{x_i^{\alpha+1}} = \alpha^n x_m^{n\alpha} \prod_{i=1}^n x_i^{-(\alpha+1)}
+$$
 
 **2. The Log-Likelihood Function** It is computationally easier to maximize the log-likelihood ($\ln L$). Taking the natural logarithm transforms the product into a sum:
 
@@ -617,10 +619,10 @@ We create a mediation dataset by sampling 150,000 unique videos and adding three
 ```{r}
 library(tidyverse)
 # Here we are taking 150000 unique videos for our dataset
-sample_videos <- sample(unique(df$video_id), 150000)
+#sample_videos <- sample(unique(df$video_id), 150000)
 
 # Filtrating this dataframe
-df_mediation <- df %>% filter(video_id %in% sample_videos)
+#df_mediation <- df %>% filter(video_id %in% sample_videos)
 
 # creating variables for our mediation: comment_rate, likes_ratio, trending_date
 df_mediation <- df %>% 
@@ -645,7 +647,9 @@ head(df_mediation)
 
 ```
 
-**Distribution of Comment Counts** We visualize the distribution of comment counts on a logarithmic scale to handle the wide range of values and identify patterns in engagement.
+**Distribution of Comment Counts** 
+
+We visualize the distribution of comment counts on a logarithmic scale to handle the wide range of values and identify patterns in engagement.
 
 ```{r}
 ggplot(df_mediation, aes(x = comment_count)) +
@@ -680,7 +684,9 @@ ggplot(top_channels, aes(x = reorder(channel_title, n_videos), y = n_videos)) +
        x="Channel", y="Number of Videos")
 ```
 
-**Dataset Summary & Trending Status** We report the dataset size and calculate the proportion of videos that trended the next day versus those that did not. The dataset contains 180,032 rows despite sampling 150,000 unique videos because each video can appear multiple times in the trending list across different days, and we analyze each trending occurrence separately to predict next-day trending behavior.
+**Dataset Summary & Trending Status** 
+
+We report the dataset size and calculate the proportion of videos that trended the next day versus those that did not.
 
 ```{r}
 cat("Number of rows in dataset:", nrow(df_mediation), "\n")
@@ -690,7 +696,9 @@ table_trending
 summary(df_mediation)
 ```
 
-**Comment Rate vs Likes Ratio** We explore the relationship between comment rate and likes ratio through a scatterplot to assess potential correlation between these engagement metrics.
+**Comment Rate vs Likes Ratio**
+
+We explore the relationship between comment rate and likes ratio through a scatterplot to assess potential correlation between these engagement metrics.
 
 ```{r}
 
@@ -744,15 +752,13 @@ summary(lm_fit)
 
 ```
 
-The regression summary indicates a strong and highly significant linear association: the estimated slope $a = 1.91$ and intercept $a_0 = 24.10$ both have p-values \< 2e-16, confirming they are statistically different from zero. The model explains approximately 25% of the variance in the likes ratio (Adjusted $R^2 = 0.2503$), showing that comment rate is an important predictor but not the sole driver. The residual standard error of 31.03 suggests moderate dispersion around the fitted line, consistent with the large variability inherent in user-engagement metrics.
+The regression summary indicates a strong and highly significant linear association: the estimated slope $a = 2.0223$ and intercept $a_0 = 24.488$ both have p-values \< 2e-16, confirming they are statistically different from zero. The model explains approximately 22% of the variance in the likes ratio (Adjusted $R^2 = 0.2273$), showing that comment rate is an important predictor but not the sole driver. The residual standard error of 29.21 suggests moderate dispersion around the fitted line, consistent with the large variability inherent in user-engagement metrics.
 
 #### b. logit regression for comments - likes -\> trending_next_day
 
-This section manually estimates the logistic regression model
-$$
+This section manually estimates the logistic regression model $$
 logit(P(Y=1)) = c'X + bM + \alpha_0,
-$$
-where $X$ is the comment rate, $M$ is the likes ratio (mediator), and $Y$ indicates whether the video appears in the trending list the next day.\
+$$ where $X$ is the comment rate, $M$ is the likes ratio (mediator), and $Y$ indicates whether the video appears in the trending list the next day.\
 We begin by centering all predictors ($X - \bar X$, $M - \bar M$, $Y - \bar Y$) and computing the unweighted cross-product sums $S_{xx}$, $S_{mm}$, $S_{xm}$, $S_{xy}$, and $S_{my}$. These allow us to obtain initial OLS-style estimates:\
 $$
 b = \frac{S_{xx}S_{my} - S_{xm}S_{xy}}{D}, \qquad
@@ -761,39 +767,25 @@ $$
 
 $$
 \alpha_0 = \bar Y - c'\bar X - b\bar M,
-$$
-where $D = S_{xx}S_{mm} - S_{xm}^2$. These serve as starting values for the iterative procedure.
+$$ where $D = S_{xx}S_{mm} - S_{xm}^2$. These serve as starting values for the iterative procedure.
 
-Next, we refine these parameters using **Iteratively Reweighted Least Squares (IRLS)**, the classical algorithm for maximizing the logistic regression log-likelihood. At each iteration we compute the linear predictor
-$$
+Next, we refine these parameters using **Iteratively Reweighted Least Squares (IRLS)**, the classical algorithm for maximizing the logistic regression log-likelihood. At each iteration we compute the linear predictor $$
 \eta = c'X + bM + \alpha_0,
-$$
-and transform it into probabilities using the logistic function
-$$
+$$ and transform it into probabilities using the logistic function $$
 p = \frac{1}{1 + e^{-\eta}}.
-$$ 
-The quantity $w = p(1 - p)$ acts as the local curvature (second derivative) of the log-likelihood and therefore serves as the weight for each observation. The working response variable
-$$
+$$ The quantity $w = p(1 - p)$ acts as the local curvature (second derivative) of the log-likelihood and therefore serves as the weight for each observation. The working response variable $$
 u = \eta + \frac{Y - p}{w}
-$$ 
-is a first-order Taylor approximation of the true log-likelihood around the current parameter values.
-Thus, IRLS repeatedly solves a **weighted** least squares system for $(c', b, \alpha_0)$ using weights $w$ and pseudo-response $u$, updating the centered weighted sums and recomputing the coefficients until convergence.
+$$ is a first-order Taylor approximation of the true log-likelihood around the current parameter values. Thus, IRLS repeatedly solves a **weighted** least squares system for $(c', b, \alpha_0)$ using weights $w$ and pseudo-response $u$, updating the centered weighted sums and recomputing the coefficients until convergence.
 
-Convergence is reached when the parameter changes
-$$
+Convergence is reached when the parameter changes $$
 |b - b_{old}|,\quad |c' - c'_{old}|,\quad |\alpha_0 - \alpha_{0,old}|
-$$ 
-become smaller than a predefined tolerance, meaning the log-likelihood is no longer improving in a meaningful way. At this point, the IRLS solution corresponds to the maximum likelihood estimates of the logistic model.
+$$ become smaller than a predefined tolerance, meaning the log-likelihood is no longer improving in a meaningful way. At this point, the IRLS solution corresponds to the maximum likelihood estimates of the logistic model.
 
-Finally, the mediation effects are computed as
-$$
+Finally, the mediation effects are computed as $$
 IE = a \times b,
-$$
-where $a$ comes from the linear regression $M = aX + a_0$, and
-$$
+$$ where $a$ comes from the linear regression $M = aX + a_0$, and $$
 DE = c'.
-$$
-The obtained coefficients are compared with the standard `glm()` output to validate correctness. This manual IRLS implementation demonstrates how the logistic regression estimator emerges from repeated weighted normal equations and how the curvature of the log-likelihood determines the adaptive weights driving convergence.
+$$ The obtained coefficients are compared with the standard `glm()` output to validate correctness. This manual IRLS implementation demonstrates how the logistic regression estimator emerges from repeated weighted normal equations and how the curvature of the log-likelihood determines the adaptive weights driving convergence.
 
 ```{r}
 X <- df_mediation$comment_rate
@@ -813,7 +805,7 @@ S_xx <- sum(X_tilde^2)
 S_xm <- sum(X_tilde * M_tilde)
 
 
-cat("M ~ X\n")
+cat("M ~ X (scaled)\n")
 cat("a =", a, "\n")
 cat("a0 =", a0, "\n\n")
 
@@ -915,7 +907,7 @@ repeat {
 }
 
 cat("Y ~ X + M (converged at iteration ", iter, ")\n")
-cat("c_prime (scaled) =", c_prime, "\n")
+cat("c_prime (scaled)=", c_prime, "\n")
 cat("b (scaled) =", b, "\n")
 cat("intercept_Y =", intercept_Y, "\n\n")
 
@@ -923,14 +915,12 @@ cat("intercept_Y =", intercept_Y, "\n\n")
 c_prime_original <- c_prime * 1000
 b_original <- b * 1000
 
-cat("Estimates in the original scale\n")
-cat("c_prime =", c_prime_original, "\n")
-cat("b =", b_original, "\n")
+cat("c_prime (unscaled)=", c_prime_original, "\n")
+cat("b (unscaled) =", b_original, "\n")
 cat("intercept_Y =", intercept_Y, "\n\n")
-
 # Mediation effects
-IE <- (a) * (b)
-DE <- c_prime
+IE <- (a) * (b_original)
+DE <- c_prime_original
 
 cat("Mediation Effects\n")
 cat("Indirect Effect (a × b) =", IE, "\n")
@@ -938,9 +928,12 @@ cat("Direct Effect (c') =", DE, "\n")
 
 # Check against glm
 logit_outcome <- glm(Y ~ X + M, family = binomial(link = "logit"))
-cat("Comparison with glm()\n")
+cat("Comparison with glm() (scaled params)\n")
 print(coef(logit_outcome))
 cat("\n")
+
+eta_pred <- c_prime_original * (X/1000) + b_original * (M/1000) + intercept_Y
+p_pred <- 1 / (1 + exp(-eta_pred))
 
 # Statistics of predictions
 cat("Prediction Statistics\n")
@@ -950,31 +943,35 @@ cat("Mean P(Y=1):", mean(p_pred), "\n")
 cat("Max P(Y=1):", max(p_pred), "\n")
 cat("Share of Y=1 in data:", mean(Y), "\n")
 ```
-The estimated linear model for the mediator gives $M = aX + a_0$ with  
-$a = 2.021576$ and $a_0 = 24.53683$, indicating that each unit increase in the comment rate is associated with an average increase of approximately $2.02$ units in the likes ratio.  
-In the logistic regression stage, the IRLS algorithm converged after 8 iterations, producing the scaled coefficients $c' = 0.006710927$ and $b = -0.003358462$, where "scaled" refers to the fact that $X$ and $M$ were internally rescaled by $1000$ to improve numerical stability of the iterations. After returning to the original units of measurement, these values become $c' = 6.710927$ and $b = -3.358462$, while the intercept remains unchanged at $-5.094691$ because it already reflects the original data scale.
 
-The indirect mediation effect equals $IE = a \times b = -0.006789385$, revealing that the pathway $X \rightarrow M \rightarrow Y$ slightly suppresses the overall effect, since the product $a \times b$ is negative. The direct effect is $DE = c' = 0.006710927$ (in scaled form), indicating that increases in comment rate directly raise the log-odds of trending, independent of likes. The agreement between the manually estimated coefficients and the `glm()` output confirms the correctness of the IRLS procedure, as the numbers match exactly: $(\alpha_0 = -5.09469$, $c' = 0.006710927$, $b = -0.003358462)$.
+The estimated linear model for the mediator gives M = a X + a0 with 
+a = 2.022368 and a0 = 24.48808, indicating that each unit increase in the comment rate is associated with an average increase of approximately 2.02 units in the likes ratio. 
+In the logistic regression stage, the IRLS algorithm converged after 8 iterations, producing the scaled coefficients c' = 0.006734761 and b = -0.003342881, where "scaled" refers to the fact that X and M were internally rescaled by 1000 to improve numerical stability of the iterations. After returning to the original units of measurement, these values become c' = 6.734761 and b = -3.342881, while the intercept remains unchanged at -5.095437 because it already reflects the original data scale.
 
-Finally, the prediction statistics show that typical predicted probabilities of trending are extremely small: the median and mean probabilities are both about $0.0057$, while the maximum predicted value is only $0.1056$. This aligns with the empirical share of trending videos in the dataset ($0.00564$), demonstrating that the fitted model captures the strong class imbalance and produces probabilities consistent with real-world frequencies.
+The indirect mediation effect equals IE = a × b = -6.760537, revealing that the pathway X → M → Y slightly suppresses the overall effect, since the product a × b is negative. The direct effect is DE = c' = 6.734761 (in unscaled form), indicating that increases in comment rate directly raise the log-odds of trending, independent of likes. The agreement between the manually estimated coefficients and the glm() output confirms the correctness of the IRLS procedure, as the numbers match exactly: (Intercept = -5.095437, X = 0.006734761, M = -0.003342881).
+
+Finally, the prediction statistics show that typical predicted probabilities of trending are extremely small: the median and mean probabilities are both about 0.0057, while the maximum predicted value is 0.106135. This aligns with the empirical share of trending videos in the dataset (0.005637229), demonstrating that the fitted model captures the strong class imbalance and produces probabilities consistent with real-world frequencies.
+
 
 #### c. Visualization of the Mediation Model
 
-The following visualizations provide an intuitive overview of the relationships captured by the mediation model.  
-We examine model-predicted trending probabilities across the range of comment rates and compare the model’s trend with the empirical bin-averaged frequencies.  
-A histogram of predicted probabilities (in log-scale) illustrates the extreme class imbalance and how the model distributes probability mass.  
+The following visualizations provide an intuitive overview of the relationships captured by the mediation model.\
+We examine model-predicted trending probabilities across the range of comment rates and compare the model’s trend with the empirical bin-averaged frequencies.\
+A histogram of predicted probabilities (in log-scale) illustrates the extreme class imbalance and how the model distributes probability mass.\
 Finally, a calibration plot compares predicted vs. observed frequencies to assess how well the logistic model aligns with empirical outcomes.
 
 ```{r}
 # Predicted trending probability vs Comment Rate
-
-eta_pred <- c_prime_original * (X/1000) + b_original * (M/1000) + intercept_Y
+# unscaling data
+X_org <- X/1000
+M_org <- M/1000
+eta_pred <- c_prime_original * (X_org) + b_original * (M_org) + intercept_Y
 p_pred <- 1 / (1 + exp(-eta_pred))
 
 # Binning
-x_bins <- cut(X/1000, breaks = 20, include.lowest = TRUE)
+x_bins <- cut(X_org, breaks = 20, include.lowest = TRUE)
 
-x_bin_mid <- tapply(X/1000, x_bins, function(v) mean(v, na.rm = TRUE))
+x_bin_mid <- tapply(X_org, x_bins, function(v) mean(v, na.rm = TRUE))
 p_bin_mean <- tapply(p_pred, x_bins, function(v) mean(v, na.rm = TRUE))
 y_bin_obs  <- tapply(Y, x_bins, function(v) mean(v, na.rm = TRUE))
 
@@ -984,7 +981,7 @@ p_bin_mean <- as.numeric(p_bin_mean)
 y_bin_obs  <- as.numeric(y_bin_obs)
 
 # Main plot
-plot(X/1000, p_pred,
+plot(X_org, p_pred,
      pch = 16, cex = 0.3, col = rgb(0, 0, 1, 0.15),
      xlab = "Comment Rate",
      ylab = "P(Y=1)",
@@ -1038,24 +1035,24 @@ grid()
 
 ### 4. p-value and Testing (Bootstrap Test for the Indirect Effect *a·b*)
 
-To evaluate whether the mediation effect is statistically significant, we test the indirect pathway  
+To evaluate whether the mediation effect is statistically significant, we test the indirect pathway\
 $$
 a \cdot b
-$$
-using a **bootstrap procedure**. Bootstrapping is preferred because the sampling distribution of the product of coefficients is often non-normal, making traditional analytic tests inaccurate.  
+$$ 
 
-Below, we resample the dataset with replacement, refit both mediator and outcome models for each bootstrap sample, and compute the product $\hat{a}^\*(b^\*)$ for every iteration.  
+using a **bootstrap procedure**. Bootstrapping is preferred because the sampling distribution of the product of coefficients is often non-normal, making traditional analytic tests inaccurate.
+
+Below, we resample the dataset with replacement, refit both mediator and outcome models for each bootstrap sample, and compute the product $\hat{a}^\*(b^\*)$ for every iteration.\
 From this bootstrap distribution, we then compute:
 
-- the bootstrap standard error  
-- the 95% confidence interval  
-- the p-value using the percentile method  
+-   the bootstrap standard error\
+-   the 95% confidence interval\
+-   the p-value using the percentile method
 
-Finally, we compare the observed indirect effect  
+Finally, we compare the observed indirect effect\
 $$
 \widehat{ab} = a_{orig} \cdot b_{orig}
-$$
-to the bootstrap distribution.
+$$ to the bootstrap distribution.
 
 **For unbalanced sample**
 
@@ -1072,8 +1069,8 @@ n <- length(X)
 
 # create a random subsample of indices
 sub_idx <- sample(1:n, n_sub, replace = FALSE)
-X_sub <- X[sub_idx]
-M_sub <- M[sub_idx]
+X_sub <- X_org[sub_idx]
+M_sub <- M_org[sub_idx]
 Y_sub <- Y[sub_idx]
 
 for (i in 1:B) {
@@ -1113,17 +1110,19 @@ cat("Observed indirect effect (a*b): ", ab_obs, "\n")
 cat("Bootstrap 95% CI: [", ci_low, ", ", ci_high, "]\n")
 cat("Bootstrap p-value: ", p_value, "\n\n")
 ```
-The code above performs a bootstrap test of the indirect effect $a \times b$ in a mediation framework, using a computationally efficient subsampling strategy.  
-In each bootstrap iteration, we resample a subset of the data with replacement, refit both the mediator model $ M \sim X $ and the outcome model $Y \sim X + M$, and compute the product of the estimated coefficients to obtain a bootstrap estimate of the indirect effect.  
-This procedure produces an empirical sampling distribution of $a \times b$, from which we derive the percentile-based 95% confidence interval and the two-sided bootstrap p-value.  
-In our results, the observed indirect effect is $-6.760537$, while the bootstrap confidence interval $[-0.03756072,\, 0.02001724]$ contains values close to zero, indicating that the indirect effect is extremely small relative to the variability of the estimator.  
-The bootstrap p-value equals **0**, meaning that none of the 1000 bootstrap samples produced an effect as extreme as the observed one, which suggests that the estimated indirect effect is statistically distinguishable from the null under this subsampled bootstrap procedure, although such a result should be interpreted cautiously due to the strong class imbalance and model instability in the data.
 
-**For balanced sample**
-To correct the strong class imbalance in the original dataset, we construct a balanced sample by identifying the indices of all positive cases (idx_1) and all negative cases (idx_0).  
-We then draw an equal number of observations from each class, using n_min as the shared sample size and sampling without replacement to avoid duplication.  
-By combining the selected indices into idx_bal_fixed, we form balanced vectors X_bal, M_bal, and Y_bal that contain an equal proportion of Y = 0 and Y = 1 cases.  
-This balanced dataset allows both the mediator model M_bal ~ X_bal and the logistic outcome model Y_bal ~ X_bal + M_bal to estimate coefficients that are not dominated by the majority class.  
+The code above performs a bootstrap test of the indirect effect a × b in a mediation framework, using a computationally efficient subsampling strategy. 
+In each bootstrap iteration, we resample a subset of the data with replacement, refit both the mediator model M ~ X and the outcome model Y ~ X + M, and compute the product of the estimated coefficients to obtain a bootstrap estimate of the indirect effect. 
+This procedure produces an empirical sampling distribution of a × b, from which we derive the percentile-based 95% confidence interval and the two-sided bootstrap p-value. 
+In our results, the observed indirect effect is -6.760537, while the bootstrap confidence interval [-37.56072, 20.01724] contains zero, indicating that the indirect effect is not statistically distinguishable from zero. 
+The bootstrap p-value equals 0.602, meaning that the observed indirect effect could plausibly arise under the null hypothesis of no mediation. 
+These results were obtained using b_original calculated on the unscaled (normal) data, which gives a realistic estimate of the indirect effect without artificially inflating or shrinking the coefficients due to data scaling.
+
+
+**For balanced sample** To correct the strong class imbalance in the original dataset, we construct a balanced sample by identifying the indices of all positive cases (idx_1) and all negative cases (idx_0).\
+We then draw an equal number of observations from each class, using n_min as the shared sample size and sampling without replacement to avoid duplication.\
+By combining the selected indices into idx_bal_fixed, we form balanced vectors X_bal, M_bal, and Y_bal that contain an equal proportion of Y = 0 and Y = 1 cases.\
+This balanced dataset allows both the mediator model M_bal \~ X_bal and the logistic outcome model Y_bal \~ X_bal + M_bal to estimate coefficients that are not dominated by the majority class.\
 As a result, the indirect effect a_bal_fixed × b_bal_fixed and its bootstrap distribution reflect genuine signal rather than class-frequency artifacts, making inference more stable and interpretable.
 
 ```{r}
@@ -1142,8 +1141,8 @@ idx0_fixed <- sample(idx_0, n_min, replace = FALSE)
 idx1_fixed <- sample(idx_1, n_min, replace = FALSE)
 idx_bal_fixed <- c(idx0_fixed, idx1_fixed)
 
-X_bal <- X[idx_bal_fixed]
-M_bal <- M[idx_bal_fixed]
+X_bal <- X_org[idx_bal_fixed]
+M_bal <- M_org[idx_bal_fixed]
 Y_bal <- Y[idx_bal_fixed]
 
 # Observed values for a and b on balanced set
@@ -1180,20 +1179,25 @@ cat("Balanced sample: Observed indirect effect (a*b): ", ab_obs_bal, "\n")
 cat("Bootstrap 95% CI: [", ci_low_bal, ", ", ci_high_bal, "]\n")
 cat("Bootstrap p-value: ", p_value_bal, "\n")
 ```
-The observed indirect effect a*b in the balanced dataset equals −0.00694, indicating that the mediated influence of X on Y through M is extremely small in magnitude.  
-The bootstrap confidence interval from −0.01689 to 0.0000127 contains zero, showing that the empirical distribution of bootstrap estimates does not support a reliably non-zero indirect effect.  
-A bootstrap p-value of 0.487 means that nearly half of the bootstrap samples produced an indirect effect larger in absolute value than the observed one, implying that the observed estimate is not statistically distinguishable from noise.  
-Because both a_bal_fixed and b_bal_fixed were estimated on a dataset with equal numbers of Y = 0 and Y = 1 cases, this result suggests that the absence of significance is not caused by class imbalance but by a genuinely weak mediated relationship.  
+
+The observed indirect effect a*b in the balanced dataset equals -6.936038, indicating that the mediated influence of X on Y through M is small in magnitude. 
+The bootstrap confidence interval from -16.88811 to 0.0126689 contains zero, showing that the empirical distribution of bootstrap estimates does not support a reliably non-zero indirect effect. 
+A bootstrap p-value of 0.487 means that nearly half of the bootstrap samples produced an indirect effect larger in absolute value than the observed one, implying that the observed estimate is not statistically distinguishable from noise. 
+Because both a_bal_fixed and b_bal_fixed were estimated on a dataset with equal numbers of Y = 0 and Y = 1 cases, this result suggests that the lack of significance is not caused by class imbalance but by a genuinely weak mediated relationship. 
 Therefore, the balanced-data bootstrap analysis supports the conclusion that mediation through M is negligible, and any effect of X on Y is likely direct or too weak to be reliably detected with the current model.
+
+
 ### 5. Conclusion
-The mediation analysis of our dataset reveals that the indirect effect of comment rate ($X$) on next-day trending probability ($Y$) through likes ratio ($M$) is extremely small. Using both the unbalanced and balanced bootstrap procedures, we observe that the estimated indirect effect $a \cdot b$ is close to zero:
 
-Unbalanced sample: $IE = -6.76 \times 10^{-3}$, 95% CI $[-0.0376, 0.0200]$, bootstrap p-value = 0
+The mediation analysis of our dataset reveals that the indirect effect of comment rate (X) on next-day trending probability (Y) through likes ratio (M) is small in magnitude. Using both the unbalanced and balanced bootstrap procedures, we observe that the estimated indirect effect a × b is close to zero:
 
-Balanced sample: $IE = -6.94 \times 10^{-3}$, 95% CI $[-0.0169, 0.000013]$, bootstrap p-value = 0.487
+Unbalanced sample: IE = -6.760537, 95% CI [-37.56072, 20.01724], bootstrap p-value = 0.602
 
-These results indicate that the mediated pathway $X \rightarrow M \rightarrow Y$ is not statistically significant once we account for class imbalance and the variability inherent in the data. In particular, the balanced-sample analysis demonstrates that even with equal representation of trending and non-trending cases, the indirect effect remains negligible, and the null hypothesis $H_0: a \cdot b = 0$ cannot be rejected.
+Balanced sample: IE = -6.936038, 95% CI [-16.88811, 0.0126689], bootstrap p-value = 0.487
 
-The direct effect $c'$, representing the influence of comment rate on trending probability independent of likes, remains positive but small, consistent with the low overall probability of videos reappearing in trending (median predicted $P(Y=1) \approx 0.0057$). The IRLS logistic regression captures the extreme class imbalance, but predictions are largely constrained to the low probability range, reflecting limited predictive power of engagement metrics for next-day trending.
+These results indicate that the mediated pathway X → M → Y is not statistically significant once we account for class imbalance and the variability inherent in the data. In particular, the balanced-sample analysis demonstrates that even with equal representation of trending and non-trending cases, the indirect effect remains negligible, and the null hypothesis H0: a × b = 0 cannot be rejected.
 
-Overall, our analysis suggests that while comment rate slightly affects likes ratio, this pathway does not meaningfully mediate the probability of a video trending again the following day. The model’s limited accuracy and low explained variance imply that additional factors—such as video content, publishing time, or external promotion—likely drive momentum in trending behavior beyond the engagement metrics considered here.
+The direct effect c', representing the influence of comment rate on trending probability independent of likes, remains positive but relatively small, consistent with the low overall probability of videos trending the next day (median predicted P(Y=1) ≈ 0.00576). The IRLS logistic regression captures the extreme class imbalance, but predictions are largely constrained to the low probability range, reflecting limited predictive power of engagement metrics for next-day trending.
+
+Overall, our analysis suggests that while comment rate modestly affects likes ratio, this pathway does not meaningfully mediate the probability of a video trending the following day. The model’s limited predictive accuracy and low explained variance imply that additional factors—such as video content, publishing time, or external promotion—likely drive momentum in trending behavior beyond the engagement metrics considered here.
+
