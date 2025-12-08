@@ -641,12 +641,6 @@ We create a mediation dataset by getting all videos and adding three key variabl
 
 ```{r}
 library(tidyverse)
-# Here we are taking 150000 unique videos for our dataset
-#sample_videos <- sample(unique(df$video_id), 150000)
-
-# Filtrating this dataframe
-#df_mediation <- df %>% filter(video_id %in% sample_videos)
-
 # creating variables for our mediation: comment_rate, likes_ratio, trending_date
 df_mediation <- df %>% 
   mutate(
@@ -1079,13 +1073,14 @@ grid()
 ### 4. p-value and Testing (Bootstrap Test for the Indirect Effect *a·b*)
 
 To evaluate whether the mediation effect is statistically significant, we test the indirect pathway\
+
 $$
 a \cdot b
 $$
 
 using a **bootstrap procedure**. Bootstrapping is preferred because the sampling distribution of the product of coefficients is often non-normal, making traditional analytic tests inaccurate.
 
-Below, we resample the dataset with replacement, refit both mediator and outcome models for each bootstrap sample, and compute the product $\hat{a}^\hat{b}$ for every iteration.\
+Below, we resample the dataset with replacement, refit both mediator and outcome models for each bootstrap sample, and compute the product $\hat{a}*\hat{b}$ for every iteration.\
 From this bootstrap distribution, we then compute:
 
 -   the bootstrap standard error\
@@ -1093,6 +1088,7 @@ From this bootstrap distribution, we then compute:
 -   the p-value using the percentile method
 
 Finally, we compare the observed indirect effect\
+
 $$
 \widehat{ab} = a_{orig} \cdot b_{orig}
 $$ 
