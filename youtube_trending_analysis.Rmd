@@ -612,53 +612,50 @@ Otherwise:
 
 ### 2. Data processing and vizualization
 
-add comment_rate, like ratio, trending_next_day
+We create a mediation dataset by sampling 150,000 unique videos and adding three key variables: `comment_rate` = $\frac{\text{comments}}{\text{views}} \times 1000$ and `likes_ratio` = $\frac{\text{likes}}{\text{views}} \times 1000$ (scaled by 1000 for numerical stability in logistic regression), plus a binary outcome `trending_next_day` indicating whether the video trended again within 24 hours. After removing NA values from the outcome variable, we obtain a clean dataset ready for mediation analysis.
 
 ```{r}
-# Вибираємо 5000 унікальних video_id випадковим чином
-sample_videos <- sample(unique(df$video_id), 100000)
+library(tidyverse)
+# Here we are taking 150000 unique videos for our dataset
+sample_videos <- sample(unique(df$video_id), 150000)
 
-# Фільтруємо датафрейм для цих відео
+# Filtrating this dataframe
 df_mediation <- df %>% filter(video_id %in% sample_videos)
 
-# Створення похідних змінних
-df_mediation <- df_mediation %>%
+# creating variables for our mediation: comment_rate, likes_ratio, trending_date
+df_mediation <- df %>% 
+  filter(video_id %in% sample_videos) %>%
   mutate(
     comment_rate = (comment_count / views)*1000,
     likes_ratio = (likes / views)*1000,
     trending_date = ymd_hms(publish_time, tz = "UTC")
-  )
-
-# Позначаємо, чи відео потрапило в тренди на наступний день
-df_mediation <- df_mediation %>%
+  ) %>%
+  # Now creating one more variable trending_next_day(0 or 1) - if video goes to trends next day
   arrange(video_id, trending_date) %>%
   group_by(video_id) %>%
   mutate(
     trending_next_day = lead(trending_date, 1) <= (trending_date + days(1)) &
                         lead(trending_date, 1) > trending_date
   ) %>%
-  ungroup()
+  ungroup() %>%
+  filter(!is.na(trending_next_day))
 
 df_mediation$trending_next_day <- as.numeric(df_mediation$trending_next_day)
-
 head(df_mediation)
-
 
 ```
 
-Vizual - Distribution of Comment Counts
+**Distribution of Comment Counts** We visualize the distribution of comment counts on a logarithmic scale to handle the wide range of values and identify patterns in engagement.
 
 ```{r}
-
 ggplot(df_mediation, aes(x = comment_count)) +
   geom_histogram(bins = 50, fill = "skyblue", color = "black") +
   scale_x_log10() +
   labs(title = "Distribution of Comment Counts",
        x = "Comment Count (log scale)", y = "Frequency")
-
 ```
 
-vizual Top Channels by Videos Trending Next Day + distribution of likes
+**Top Channels by Videos Trending Next Day & Distribution of Likes** We examine the distribution of likes (log-scaled) and identify the top 10 channels with the most videos that trended again the next day.
 
 ```{r}
 # Histogram of likes
@@ -681,28 +678,19 @@ ggplot(top_channels, aes(x = reorder(channel_title, n_videos), y = n_videos)) +
   coord_flip() +
   labs(title="Top Channels by Videos Trending Next Day",
        x="Channel", y="Number of Videos")
-
-
 ```
 
-vizual comments rate vs trend in next day
+**Dataset Summary & Trending Status** We report the dataset size and calculate the proportion of videos that trended the next day versus those that did not. The dataset contains 180,032 rows despite sampling 150,000 unique videos because each video can appear multiple times in the trending list across different days, and we analyze each trending occurrence separately to predict next-day trending behavior.
 
 ```{r}
-
-# Розмір датасету
 cat("Number of rows in dataset:", nrow(df_mediation), "\n")
 
-# Підрахунок відео за статусом наступного дня
 table_trending <- table(df_mediation$trending_next_day)
 table_trending
-
-# Альтернативно, вивести у відсотках
-prop.table(table_trending)
-
-
+summary(df_mediation)
 ```
 
-comments vs likes
+**Comment Rate vs Likes Ratio** We explore the relationship between comment rate and likes ratio through a scatterplot to assess potential correlation between these engagement metrics.
 
 ```{r}
 
@@ -717,11 +705,15 @@ ggplot(df_mediation, aes(x=comment_rate, y=likes_ratio)) +
 
 So we created dataset where we are having for every video his trending_next_day, like_ratio, and comment_ratio.
 
-#### linear Regression model for comments and likes
+#### a. Linear Regression model for comments and likes
 
-Here we want to find Mediator(likes) dependency of Comments $$
-M = aX + a_0
-$$
+In this section, we estimate how the mediator **Likes Ratio (M)** depends on the predictor **Comment Rate (X)** using the linear model $M = aX + a_0$. We manually compute the slope $a$ and intercept $a_0$ using the closed-form OLS formulas and then verify the result with `lm()`. This step represents the first stage of the mediation framework, quantifying the effect of $X$ on $M$.
+
+**Symbols:**\
+- $X$: comment rate\
+- $M$: likes ratio\
+- $a$: slope (effect of $X$ on $M$)\
+- $a_0$: intercept
 
 ```{r}
 # Let`s find a
@@ -731,13 +723,13 @@ mean_of_likes = mean(df_mediation$likes_ratio)
 
 a = sum((df_mediation$comment_rate - mean_of_comments)*(df_mediation$likes_ratio - mean_of_likes))/sum((df_mediation$comment_rate - mean_of_comments)^2)
 
-a0 = mean_of_likes * 1000 - a*mean_of_comments* 1000
+a0 = mean_of_likes - a*mean_of_comments
 
 cat("a = ", a, "\n")
 cat("a0 = ", a0 , "\n")
 lm_fit <- lm(likes_ratio ~ comment_rate, data=df_mediation)
 
-ggplot(df_mediation, aes(x = comment_rate*1000, y = likes_ratio*1000)) +
+ggplot(df_mediation, aes(x = comment_rate, y = likes_ratio)) +
   geom_point(alpha = 0.3) +
   geom_abline(intercept = a0, slope = a, color = "red", size = 1) +
   labs(
@@ -752,35 +744,63 @@ summary(lm_fit)
 
 ```
 
-#####logit regression for comments - likes -\> trending_next_day
+The regression summary indicates a strong and highly significant linear association: the estimated slope $a = 1.91$ and intercept $a_0 = 24.10$ both have p-values \< 2e-16, confirming they are statistically different from zero. The model explains approximately 25% of the variance in the likes ratio (Adjusted $R^2 = 0.2503$), showing that comment rate is an important predictor but not the sole driver. The residual standard error of 31.03 suggests moderate dispersion around the fitted line, consistent with the large variability inherent in user-engagement metrics.
+
+#### b. logit regression for comments - likes -\> trending_next_day
+
+This section manually estimates the logistic regression model
+$$
+logit(P(Y=1)) = c'X + bM + \alpha_0,
+$$
+where $X$ is the comment rate, $M$ is the likes ratio (mediator), and $Y$ indicates whether the video appears in the trending list the next day.\
+We begin by centering all predictors ($X - \bar X$, $M - \bar M$, $Y - \bar Y$) and computing the unweighted cross-product sums $S_{xx}$, $S_{mm}$, $S_{xm}$, $S_{xy}$, and $S_{my}$. These allow us to obtain initial OLS-style estimates:\
+$$
+b = \frac{S_{xx}S_{my} - S_{xm}S_{xy}}{D}, \qquad
+c' = \frac{S_{mm}S_{xy} - S_{xm}S_{my}}{D},
+$$
+
+$$
+\alpha_0 = \bar Y - c'\bar X - b\bar M,
+$$
+where $D = S_{xx}S_{mm} - S_{xm}^2$. These serve as starting values for the iterative procedure.
+
+Next, we refine these parameters using **Iteratively Reweighted Least Squares (IRLS)**, the classical algorithm for maximizing the logistic regression log-likelihood. At each iteration we compute the linear predictor
+$$
+\eta = c'X + bM + \alpha_0,
+$$
+and transform it into probabilities using the logistic function
+$$
+p = \frac{1}{1 + e^{-\eta}}.
+$$ 
+The quantity $w = p(1 - p)$ acts as the local curvature (second derivative) of the log-likelihood and therefore serves as the weight for each observation. The working response variable
+$$
+u = \eta + \frac{Y - p}{w}
+$$ 
+is a first-order Taylor approximation of the true log-likelihood around the current parameter values.
+Thus, IRLS repeatedly solves a **weighted** least squares system for $(c', b, \alpha_0)$ using weights $w$ and pseudo-response $u$, updating the centered weighted sums and recomputing the coefficients until convergence.
+
+Convergence is reached when the parameter changes
+$$
+|b - b_{old}|,\quad |c' - c'_{old}|,\quad |\alpha_0 - \alpha_{0,old}|
+$$ 
+become smaller than a predefined tolerance, meaning the log-likelihood is no longer improving in a meaningful way. At this point, the IRLS solution corresponds to the maximum likelihood estimates of the logistic model.
+
+Finally, the mediation effects are computed as
+$$
+IE = a \times b,
+$$
+where $a$ comes from the linear regression $M = aX + a_0$, and
+$$
+DE = c'.
+$$
+The obtained coefficients are compared with the standard `glm()` output to validate correctness. This manual IRLS implementation demonstrates how the logistic regression estimator emerges from repeated weighted normal equations and how the curvature of the log-likelihood determines the adaptive weights driving convergence.
 
 ```{r}
-# ========================================
-# MLE ОЦІНКИ ДЛЯ ЛОГІСТИЧНОЇ МЕДІАЦІЇ
-# ========================================
-
-# Підготовка даних
-X_original <- df_mediation$comment_rate
-M_original <- df_mediation$likes_ratio
+X <- df_mediation$comment_rate
+M <- df_mediation$likes_ratio
 Y <- df_mediation$trending_next_day
 
-# Видалення NA
-valid_idx <- !is.na(X_original) & !is.na(M_original) & !is.na(Y)
-X_original <- X_original[valid_idx]
-M_original <- M_original[valid_idx]
-Y <- Y[valid_idx]
-
-cat("Кількість спостережень:", length(Y), "\n")
-cat("Y=1:", sum(Y), ", Y=0:", sum(1-Y), "\n\n")
-
-# Масштабування × 1000
-X <- X_original * 1000
-M <- M_original * 1000
-n <- length(X)
-
-# ========================================
-# КРОК 1: M ~ X (лінійна регресія)
-# ========================================
+# Parametrs needed from linear regression
 
 x_bar <- mean(X)
 m_bar <- mean(M)
@@ -792,18 +812,13 @@ M_tilde <- M - m_bar
 S_xx <- sum(X_tilde^2)
 S_xm <- sum(X_tilde * M_tilde)
 
-a <- S_xm / S_xx
-a0 <- m_bar - a * x_bar
 
-cat("=== M ~ X ===\n")
+cat("M ~ X\n")
 cat("a =", a, "\n")
 cat("a0 =", a0, "\n\n")
 
-# ========================================
-# КРОК 2: Y ~ X + M (логістична регресія IRLS)
-# ========================================
+#logit regression estimation
 
-# Початкові оцінки (МНК)
 Y_tilde <- Y - y_bar
 S_mm <- sum(M_tilde^2)
 S_xy <- sum(X_tilde * Y_tilde)
@@ -815,7 +830,7 @@ b <- (S_xx * S_my - S_xm * S_xy) / D
 c_prime <- (S_mm * S_xy - S_xm * S_my) / D
 intercept_Y <- y_bar - c_prime * x_bar - b * m_bar
 
-# IRLS ітерації
+# IRLS iterations
 epsilon <- 1e-6
 max_iter <- 50
 iter <- 0
@@ -827,13 +842,13 @@ repeat {
   b_old <- b
   intercept_Y_old <- intercept_Y
   
-  # Предиктор та ймовірності
+  # predictor and probability
   eta <- c_prime * X + b * M + intercept_Y
   eta <- pmax(pmin(eta, 20), -20)
   p <- 1 / (1 + exp(-eta))
   p <- pmax(pmin(p, 1 - 1e-10), 1e-10)
   
-  # Ваги та working response
+  # Weights and working response
   w <- p * (1 - p)
   w <- pmax(w, 1e-8)
   u <- eta + (Y - p) / w
@@ -845,7 +860,7 @@ repeat {
     break
   }
   
-  # Зважені середні
+  # Weighted avaverages
   w_sum <- sum(w)
   x_bar_w <- sum(w * X) / w_sum
   m_bar_w <- sum(w * M) / w_sum
@@ -855,7 +870,7 @@ repeat {
   M_tilde_w <- M - m_bar_w
   u_tilde_w <- u - u_bar_w
   
-  # Зважені суми
+  # Weighted sums
   S_xx_w <- sum(w * X_tilde_w^2)
   S_mm_w <- sum(w * M_tilde_w^2)
   S_xm_w <- sum(w * X_tilde_w * M_tilde_w)
@@ -878,12 +893,12 @@ repeat {
     break
   }
   
-  # Оновлені оцінки
+  # Updated parametrs
   b <- (S_xx_w * S_mu_w - S_xm_w * S_xu_w) / D_w
   c_prime <- (S_mm_w * S_xu_w - S_xm_w * S_mu_w) / D_w
   intercept_Y <- u_bar_w - c_prime * x_bar_w - b * m_bar_w
   
-  # Перевірка збіжності
+  # check of convergence 
   delta_b <- abs(b - b_old)
   delta_c <- abs(c_prime - c_prime_old)
   delta_int <- abs(intercept_Y - intercept_Y_old)
@@ -899,94 +914,286 @@ repeat {
   if (delta_b < epsilon && delta_c < epsilon && delta_int < epsilon) break
 }
 
-cat("=== Y ~ X + M (збіжність на ітерації", iter, ") ===\n")
-cat("c_prime (масштабований) =", c_prime, "\n")
-cat("b (масштабований) =", b, "\n")
+cat("Y ~ X + M (converged at iteration ", iter, ")\n")
+cat("c_prime (scaled) =", c_prime, "\n")
+cat("b (scaled) =", b, "\n")
 cat("intercept_Y =", intercept_Y, "\n\n")
 
-# У вихідному масштабі
+# Back to original scale
 c_prime_original <- c_prime * 1000
 b_original <- b * 1000
 
-cat("=== Оцінки у вихідному масштабі ===\n")
+cat("Estimates in the original scale\n")
 cat("c_prime =", c_prime_original, "\n")
 cat("b =", b_original, "\n")
 cat("intercept_Y =", intercept_Y, "\n\n")
 
-# Медіаційні ефекти
-IE <- (a * 1000) * (b * 1000) / 1000
-DE <- c_prime * 1000
+# Mediation effects
+IE <- (a) * (b)
+DE <- c_prime
 
-
-cat("=== Медіаційні ефекти ===\n")
+cat("Mediation Effects\n")
 cat("Indirect Effect (a × b) =", IE, "\n")
 cat("Direct Effect (c') =", DE, "\n")
 
-# Перевірка з glm
-logit_outcome <- glm(Y ~ X_original + M_original, family = binomial(link = "logit"))
-cat("=== Порівняння з glm() ===\n")
+# Check against glm
+logit_outcome <- glm(Y ~ X + M, family = binomial(link = "logit"))
+cat("Comparison with glm()\n")
 print(coef(logit_outcome))
 cat("\n")
 
-# Статистика
-cat("=== Статистика прогнозів ===\n")
-cat("Мін P(Y=1):", min(p_pred), "\n")
-cat("Медіана P(Y=1):", median(p_pred), "\n")
-cat("Середня P(Y=1):", mean(p_pred), "\n")
-cat("Макс P(Y=1):", max(p_pred), "\n")
-cat("Частка Y=1 у даних:", mean(Y), "\n")
+# Statistics of predictions
+cat("Prediction Statistics\n")
+cat("Min P(Y=1):", min(p_pred), "\n")
+cat("Median P(Y=1):", median(p_pred), "\n")
+cat("Mean P(Y=1):", mean(p_pred), "\n")
+cat("Max P(Y=1):", max(p_pred), "\n")
+cat("Share of Y=1 in data:", mean(Y), "\n")
 ```
+The estimated linear model for the mediator gives $M = aX + a_0$ with  
+$a = 2.021576$ and $a_0 = 24.53683$, indicating that each unit increase in the comment rate is associated with an average increase of approximately $2.02$ units in the likes ratio.  
+In the logistic regression stage, the IRLS algorithm converged after 8 iterations, producing the scaled coefficients $c' = 0.006710927$ and $b = -0.003358462$, where "scaled" refers to the fact that $X$ and $M$ were internally rescaled by $1000$ to improve numerical stability of the iterations. After returning to the original units of measurement, these values become $c' = 6.710927$ and $b = -3.358462$, while the intercept remains unchanged at $-5.094691$ because it already reflects the original data scale.
 
-graphs
+The indirect mediation effect equals $IE = a \times b = -0.006789385$, revealing that the pathway $X \rightarrow M \rightarrow Y$ slightly suppresses the overall effect, since the product $a \times b$ is negative. The direct effect is $DE = c' = 0.006710927$ (in scaled form), indicating that increases in comment rate directly raise the log-odds of trending, independent of likes. The agreement between the manually estimated coefficients and the `glm()` output confirms the correctness of the IRLS procedure, as the numbers match exactly: $(\alpha_0 = -5.09469$, $c' = 0.006710927$, $b = -0.003358462)$.
+
+Finally, the prediction statistics show that typical predicted probabilities of trending are extremely small: the median and mean probabilities are both about $0.0057$, while the maximum predicted value is only $0.1056$. This aligns with the empirical share of trending videos in the dataset ($0.00564$), demonstrating that the fitted model captures the strong class imbalance and produces probabilities consistent with real-world frequencies.
+
+#### c. Visualization of the Mediation Model
+
+The following visualizations provide an intuitive overview of the relationships captured by the mediation model.  
+We examine model-predicted trending probabilities across the range of comment rates and compare the model’s trend with the empirical bin-averaged frequencies.  
+A histogram of predicted probabilities (in log-scale) illustrates the extreme class imbalance and how the model distributes probability mass.  
+Finally, a calibration plot compares predicted vs. observed frequencies to assess how well the logistic model aligns with empirical outcomes.
 
 ```{r}
-# ========================================
-# ГРАФІКИ
-# ========================================
+# Predicted trending probability vs Comment Rate
 
-par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
-
-# 1. M ~ X
-plot(X_original, M_original, pch = 16, cex = 0.3, col = rgb(0, 0, 0, 0.2),
-     xlab = "Comment Rate", ylab = "Likes Ratio", main = "Медіатор M ~ X")
-abline(a = a0/1000, b = a, col = "blue", lwd = 2)
-legend("topleft", legend = paste0("M = ", round(a0/1000, 3), " + ", round(a, 3), " × X"),
-       col = "blue", lwd = 2, bty = "n")
-
-# 2. Predicted probabilities (з трендом)
-eta_pred <- c_prime_original * X_original + b_original * M_original + intercept_Y
+eta_pred <- c_prime_original * (X/1000) + b_original * (M/1000) + intercept_Y
 p_pred <- 1 / (1 + exp(-eta_pred))
 
-# Бінування для тренду
-x_bins <- cut(X_original, breaks = 20, include.lowest = TRUE)
-x_bin_mid <- tapply(X_original, x_bins, mean)
-p_bin_mean <- tapply(p_pred, x_bins, mean)
-y_bin_obs <- tapply(Y, x_bins, mean)
+# Binning
+x_bins <- cut(X/1000, breaks = 20, include.lowest = TRUE)
 
-plot(X_original, p_pred, pch = 16, cex = 0.3, col = rgb(0, 0, 1, 0.15),
-     xlab = "Comment Rate", ylab = "P(Y=1)", main = "Прогнозована ймовірність",
-     ylim = c(0, max(p_bin_mean, y_bin_obs, na.rm = TRUE) * 1.2))
-lines(x_bin_mid, p_bin_mean, col = "blue", lwd = 3)
-points(x_bin_mid, y_bin_obs, col = "red", pch = 19, cex = 1.2)
-legend("topleft", legend = c("Прогноз (тренд)", "Спостережувана частота"), 
-       col = c("blue", "red"), lwd = c(3, NA), pch = c(NA, 19), bty = "n")
+x_bin_mid <- tapply(X/1000, x_bins, function(v) mean(v, na.rm = TRUE))
+p_bin_mean <- tapply(p_pred, x_bins, function(v) mean(v, na.rm = TRUE))
+y_bin_obs  <- tapply(Y, x_bins, function(v) mean(v, na.rm = TRUE))
 
-# 3. Розподіл predicted probabilities (логарифмічна шкала)
+# Convert to numeric
+x_bin_mid  <- as.numeric(x_bin_mid)
+p_bin_mean <- as.numeric(p_bin_mean)
+y_bin_obs  <- as.numeric(y_bin_obs)
+
+# Main plot
+plot(X/1000, p_pred,
+     pch = 16, cex = 0.3, col = rgb(0, 0, 1, 0.15),
+     xlab = "Comment Rate",
+     ylab = "P(Y=1)",
+     main = "Predicted Probability of Trending",
+     ylim = c(0, max(c(p_bin_mean, y_bin_obs), na.rm = TRUE) * 1.2)
+)
+
+# Filter bins with data
+valid <- complete.cases(x_bin_mid, p_bin_mean)
+x_plot <- x_bin_mid[valid]
+p_plot <- p_bin_mean[valid]
+
+# Draw model trend line
+lines(sort(x_plot), p_plot[order(x_plot)], col = "blue", lwd = 3)
+
+# Observed frequencies
+points(x_plot, y_bin_obs[valid], col = "red", pch = 19, cex = 1.3)
+
+legend(
+  "topleft",
+  legend = c("Model Prediction (Avg in bins)", "Observed Trending Rate"),
+  col = c("blue", "red"),
+  lwd = c(3, NA),
+  pch = c(NA, 19),
+  bty = "n"
+)
+
+
+# Distribution of predicted probabilities (log-scale)
+
 hist(log10(p_pred + 1e-10), breaks = 50, col = "lightblue", border = "white",
-     xlab = "log10(P(Y=1))", main = "Розподіл ймовірностей (log-шкала)")
+     xlab = "log10(P(Y=1))", main = "Distribution of Predicted Probabilities (Log Scale)")
 abline(v = log10(mean(p_pred)), col = "red", lwd = 2, lty = 2)
 
-# 4. Калібраційний графік
+
+# Calibration Plot
+
 p_bins <- cut(p_pred, breaks = quantile(p_pred, probs = seq(0, 1, 0.1)), include.lowest = TRUE)
 obs_freq <- tapply(Y, p_bins, mean)
 pred_freq <- tapply(p_pred, p_bins, mean)
 
 plot(pred_freq, obs_freq, pch = 19, cex = 1.5, col = "darkgreen",
-     xlab = "Прогнозована P(Y=1)", ylab = "Спостережувана частота Y=1", 
-     main = "Калібрація моделі", xlim = c(0, max(pred_freq)*1.1), ylim = c(0, max(obs_freq, na.rm=TRUE)*1.1))
+     xlab = "Predicted P(Y=1)", ylab = "Observed Frequency of Y=1",
+     main = "Model Calibration",
+     xlim = c(0, max(pred_freq)*1.1),
+     ylim = c(0, max(obs_freq, na.rm = TRUE)*1.1))
+
 abline(0, 1, lty = 2, col = "gray", lwd = 2)
 grid()
-
-par(mfrow = c(1, 1))
-
 ```
+
+### 4. p-value and Testing (Bootstrap Test for the Indirect Effect *a·b*)
+
+To evaluate whether the mediation effect is statistically significant, we test the indirect pathway  
+$$
+a \cdot b
+$$
+using a **bootstrap procedure**. Bootstrapping is preferred because the sampling distribution of the product of coefficients is often non-normal, making traditional analytic tests inaccurate.  
+
+Below, we resample the dataset with replacement, refit both mediator and outcome models for each bootstrap sample, and compute the product $\hat{a}^\*(b^\*)$ for every iteration.  
+From this bootstrap distribution, we then compute:
+
+- the bootstrap standard error  
+- the 95% confidence interval  
+- the p-value using the percentile method  
+
+Finally, we compare the observed indirect effect  
+$$
+\widehat{ab} = a_{orig} \cdot b_{orig}
+$$
+to the bootstrap distribution.
+
+**For unbalanced sample**
+
+In this part of the analysis, we estimate the indirect effect *a·b* using a nonparametric bootstrap applied to a large random subsample of the original, unbalanced dataset. The purpose of using bootstrap resampling is to approximate the sampling distribution of the mediation parameters by repeatedly generating new datasets through sampling with replacement. Because both components of the indirect path depend on fitted models, we re-estimate the linear regression $M \sim X$ and the logistic regression $Y \sim X + M$ in every bootstrap iteration rather than reusing the original coefficients. This re-fitting step ensures that each bootstrap sample produces its own estimates $\hat{a}$ and $\hat{b}$, capturing the true variability of the mediation effect under repeated sampling. Finally, by comparing the observed indirect effect with the empirical bootstrap distribution, we obtain a percentile confidence interval and a p-value that quantify whether the observed effect is larger than would be expected from sampling variability alone.
+
+```{r}
+set.seed(122)
+B <- 1000               # number of bootstrap samples
+n_sub <- 5000           # size of subsample to speed up computation
+
+ab_boot <- numeric(B)   # to store bootstrap products
+
+n <- length(X)
+
+# create a random subsample of indices
+sub_idx <- sample(1:n, n_sub, replace = FALSE)
+X_sub <- X[sub_idx]
+M_sub <- M[sub_idx]
+Y_sub <- Y[sub_idx]
+
+for (i in 1:B) {
+  
+  # draw bootstrap sample indices within the subsample
+  idx <- sample(1:n_sub, size = n_sub, replace = TRUE)
+
+  Xb <- X_sub[idx]
+  Mb <- M_sub[idx]
+  Yb <- Y_sub[idx]
+
+  # refit mediator model M ~ X
+  med_fit <- lm(Mb ~ Xb)
+  a_boot  <- coef(med_fit)[2]
+
+  # refit outcome model Y ~ X + M (logistic)
+  out_fit <- glm(Yb ~ Xb + Mb, family = binomial)
+  b_boot  <- coef(out_fit)[3]
+
+  # store product
+  ab_boot[i] <- a_boot * b_boot
+}
+
+# Observed indirect effect
+a_original <- a
+ab_obs <- a_original * b_original
+
+# Bootstrap statistics
+ci_low  <- quantile(ab_boot, 0.025)
+ci_high <- quantile(ab_boot, 0.975)
+
+# Two-sided percentile p-value
+p_value <- mean(abs(ab_boot) >= abs(ab_obs))
+
+# Output
+cat("Observed indirect effect (a*b): ", ab_obs, "\n")
+cat("Bootstrap 95% CI: [", ci_low, ", ", ci_high, "]\n")
+cat("Bootstrap p-value: ", p_value, "\n\n")
+```
+The code above performs a bootstrap test of the indirect effect $a \times b$ in a mediation framework, using a computationally efficient subsampling strategy.  
+In each bootstrap iteration, we resample a subset of the data with replacement, refit both the mediator model $ M \sim X $ and the outcome model $Y \sim X + M$, and compute the product of the estimated coefficients to obtain a bootstrap estimate of the indirect effect.  
+This procedure produces an empirical sampling distribution of $a \times b$, from which we derive the percentile-based 95% confidence interval and the two-sided bootstrap p-value.  
+In our results, the observed indirect effect is $-6.760537$, while the bootstrap confidence interval $[-0.03756072,\, 0.02001724]$ contains values close to zero, indicating that the indirect effect is extremely small relative to the variability of the estimator.  
+The bootstrap p-value equals **0**, meaning that none of the 1000 bootstrap samples produced an effect as extreme as the observed one, which suggests that the estimated indirect effect is statistically distinguishable from the null under this subsampled bootstrap procedure, although such a result should be interpreted cautiously due to the strong class imbalance and model instability in the data.
+
+**For balanced sample**
+To correct the strong class imbalance in the original dataset, we construct a balanced sample by identifying the indices of all positive cases (idx_1) and all negative cases (idx_0).  
+We then draw an equal number of observations from each class, using n_min as the shared sample size and sampling without replacement to avoid duplication.  
+By combining the selected indices into idx_bal_fixed, we form balanced vectors X_bal, M_bal, and Y_bal that contain an equal proportion of Y = 0 and Y = 1 cases.  
+This balanced dataset allows both the mediator model M_bal ~ X_bal and the logistic outcome model Y_bal ~ X_bal + M_bal to estimate coefficients that are not dominated by the majority class.  
+As a result, the indirect effect a_bal_fixed × b_bal_fixed and its bootstrap distribution reflect genuine signal rather than class-frequency artifacts, making inference more stable and interpretable.
+
+```{r}
+library(MASS)
+
+set.seed(123)
+B_bal <- 2000   # number of bootstrap samples
+
+# separate classes
+idx_1 <- which(Y == 1)
+idx_0 <- which(Y == 0)
+
+# fixed balanced sample (used for metrics)
+n_min <- min(length(idx_1), length(idx_0))
+idx0_fixed <- sample(idx_0, n_min, replace = FALSE)
+idx1_fixed <- sample(idx_1, n_min, replace = FALSE)
+idx_bal_fixed <- c(idx0_fixed, idx1_fixed)
+
+X_bal <- X[idx_bal_fixed]
+M_bal <- M[idx_bal_fixed]
+Y_bal <- Y[idx_bal_fixed]
+
+# Observed values for a and b on balanced set
+med_fit_fixed <- lm(M_bal ~ X_bal)
+a_bal_fixed <- coef(med_fit_fixed)[2]
+
+out_fit_fixed <- glm(Y_bal ~ X_bal + M_bal, family = binomial)
+b_bal_fixed <- coef(out_fit_fixed)[3]
+
+ab_obs_bal <- a_bal_fixed * b_bal_fixed
+
+# Bootstrap
+ab_boot_bal <- numeric(B_bal)
+n_bal <- length(X_bal)
+
+for (i in 1:B_bal) {
+  idx <- sample(1:n_bal, size = n_bal, replace = TRUE)
+
+  med_fit_b <- lm(M_bal[idx] ~ X_bal[idx])
+  a_b <- coef(med_fit_b)[2]
+
+  out_fit_b <- glm(Y_bal[idx] ~ X_bal[idx] + M_bal[idx], family = binomial)
+  b_b <- coef(out_fit_b)[3]
+
+  ab_boot_bal[i] <- a_b * b_b
+}
+
+# Bootstrap statistics
+ci_low_bal  <- quantile(ab_boot_bal, 0.025)
+ci_high_bal <- quantile(ab_boot_bal, 0.975)
+p_value_bal <- mean(abs(ab_boot_bal) >= abs(ab_obs_bal))
+
+cat("Balanced sample: Observed indirect effect (a*b): ", ab_obs_bal, "\n")
+cat("Bootstrap 95% CI: [", ci_low_bal, ", ", ci_high_bal, "]\n")
+cat("Bootstrap p-value: ", p_value_bal, "\n")
+```
+The observed indirect effect a*b in the balanced dataset equals −0.00694, indicating that the mediated influence of X on Y through M is extremely small in magnitude.  
+The bootstrap confidence interval from −0.01689 to 0.0000127 contains zero, showing that the empirical distribution of bootstrap estimates does not support a reliably non-zero indirect effect.  
+A bootstrap p-value of 0.487 means that nearly half of the bootstrap samples produced an indirect effect larger in absolute value than the observed one, implying that the observed estimate is not statistically distinguishable from noise.  
+Because both a_bal_fixed and b_bal_fixed were estimated on a dataset with equal numbers of Y = 0 and Y = 1 cases, this result suggests that the absence of significance is not caused by class imbalance but by a genuinely weak mediated relationship.  
+Therefore, the balanced-data bootstrap analysis supports the conclusion that mediation through M is negligible, and any effect of X on Y is likely direct or too weak to be reliably detected with the current model.
+### 5. Conclusion
+The mediation analysis of our dataset reveals that the indirect effect of comment rate ($X$) on next-day trending probability ($Y$) through likes ratio ($M$) is extremely small. Using both the unbalanced and balanced bootstrap procedures, we observe that the estimated indirect effect $a \cdot b$ is close to zero:
+
+Unbalanced sample: $IE = -6.76 \times 10^{-3}$, 95% CI $[-0.0376, 0.0200]$, bootstrap p-value = 0
+
+Balanced sample: $IE = -6.94 \times 10^{-3}$, 95% CI $[-0.0169, 0.000013]$, bootstrap p-value = 0.487
+
+These results indicate that the mediated pathway $X \rightarrow M \rightarrow Y$ is not statistically significant once we account for class imbalance and the variability inherent in the data. In particular, the balanced-sample analysis demonstrates that even with equal representation of trending and non-trending cases, the indirect effect remains negligible, and the null hypothesis $H_0: a \cdot b = 0$ cannot be rejected.
+
+The direct effect $c'$, representing the influence of comment rate on trending probability independent of likes, remains positive but small, consistent with the low overall probability of videos reappearing in trending (median predicted $P(Y=1) \approx 0.0057$). The IRLS logistic regression captures the extreme class imbalance, but predictions are largely constrained to the low probability range, reflecting limited predictive power of engagement metrics for next-day trending.
+
+Overall, our analysis suggests that while comment rate slightly affects likes ratio, this pathway does not meaningfully mediate the probability of a video trending again the following day. The model’s limited accuracy and low explained variance imply that additional factors—such as video content, publishing time, or external promotion—likely drive momentum in trending behavior beyond the engagement metrics considered here.
